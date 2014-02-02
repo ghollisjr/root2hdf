@@ -4,6 +4,11 @@ converting ROOT TTrees into HDF5 datasets.
 The only requirements for using it are having ROOT and HDF5 properly
 installed.
 
+The arguments to root2hdf are the name of the TTree in the ROOT file,
+the root file path, and the output path for the generated conversion
+program.  The generated conversion program takes 2 arguments: The ROOT
+file path, and the output HDF5 file path.
+
 Currently root2hdf supports TTrees with branch types that are basic
 types (Char_t, Int_t, Float_t, etc.) or arrays of the basic types; no
 compound types are supported (yet?).
