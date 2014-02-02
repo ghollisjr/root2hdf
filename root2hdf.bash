@@ -67,7 +67,7 @@ else
     atoms=($(for a in ${rawvars[@]}; do echo $a | grep -v '\['; done;))
     rawarrays=($(for a in ${rawvars[@]}; do echo $a | grep '\['; done;))
     arrays=($(for a in ${rawarrays[@]}; do echo $a | sed -e 's/\[.*\]//'; done;))
-    arraysizes=($(for a in ${rawarrays[@]}; do echo $a | grep -o '[[:digit:]]\+'; done;))
+    arraysizes=($(for a in ${rawarrays[@]}; do echo $a | grep -o '\[[[:digit:]]\+\]' | grep -o '[[:digit:]]\+'; done;))
     # Generate source code:
     # Fix header:
     cat treeclass.h | awk 'BEGIN {in_class=0; needs_fixing=1;} {if(/class/) {in_class=1; print($0);} else if(in_class && /};/) print("ClassDef(treeclass,1);};"); else print($0);}' > treeclass2.h
@@ -144,6 +144,7 @@ else
         echo "event_tid = H5Tcreate(H5T_COMPOUND, sizeof(event));"
         # Insert members:
         for((i=0; i<${#rawvars[@]}; i=(i+1))); do
+            echo "std::cout << \"inserting ${rawvars[i]}\" << std::endl;"
             if [[ $(echo ${rawvars[i]} | grep '\[') == "" ]] ; then
                 # scalar
                 echo "H5Tinsert(event_tid,\"${rawvars[i]}\", HOFFSET(event, ${rawvars[i]}), ${typemap[${types[i]}]});"
@@ -190,5 +191,5 @@ else
     # cleanup:
     cd "$startdir"
     mv "$workdir/converter_prog" "$converter_prog"
-    rm -r $workdir
+    #rm -r $workdir
 fi
