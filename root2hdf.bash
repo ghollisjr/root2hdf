@@ -144,7 +144,6 @@ else
         echo "event_tid = H5Tcreate(H5T_COMPOUND, sizeof(event));"
         # Insert members:
         for((i=0; i<${#rawvars[@]}; i=(i+1))); do
-            echo "std::cout << \"inserting ${rawvars[i]}\" << std::endl;"
             if [[ $(echo ${rawvars[i]} | grep '\[') == "" ]] ; then
                 # scalar
                 echo "H5Tinsert(event_tid,\"${rawvars[i]}\", HOFFSET(event, ${rawvars[i]}), ${typemap[${types[i]}]});"
@@ -191,5 +190,5 @@ else
     # cleanup:
     cd "$startdir"
     mv "$workdir/converter_prog" "$converter_prog"
-    #rm -r $workdir
+    rm -r $workdir
 fi

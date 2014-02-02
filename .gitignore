@@ -1,2 +1,4 @@
 *.skim
+*.h5
+converter
 .emacs_backups/
