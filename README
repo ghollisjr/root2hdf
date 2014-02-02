@@ -9,3 +9,5 @@ types (Char_t, Int_t, Float_t, etc.) or arrays of the basic types; no
 compound types are supported (yet?).
 
 To see usage options just run root2hdf without any arguments.
+
+License is public domain; feel free to use it for whatever.
