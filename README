@@ -1,0 +1,11 @@
+root2hdf is a simple bash script which generates a program for
+converting ROOT TTrees into HDF5 datasets.
+
+The only requirements for using it are having ROOT and HDF5 properly
+installed.
+
+Currently root2hdf supports TTrees with branch types that are basic
+types (Char_t, Int_t, Float_t, etc.) or arrays of the basic types; no
+compound types are supported (yet?).
+
+To see usage options just run root2hdf without any arguments.
