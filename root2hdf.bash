@@ -1,0 +1,194 @@
+#!/bin/bash
+function makearraytype
+{
+    arrayname=$1
+    arraytype=$2
+    arraysize=$3
+    echo "hsize_t ${arrayname}_dim[] = {${arraysize}};"
+    echo "hid_t ${arrayname}_type = H5Tarray_create(${typemap[$arraytype]}, 1, ${arrayname}_dim);"
+}
+
+function arraytypename
+{
+    arrayname=$1
+    echo "${arrayname}_type"
+}
+
+if [[ $# -ne 3 ]] ; then
+
+    echo "Usage: root2hdf <treename> <infile.root> <converter_prog>"
+    echo ""
+    echo "This script generates a program for converting a ROOT file"
+    echo "into an HDF5 file, taking the input and output file names"
+    echo "as its only arguments."
+    
+else
+
+    # Map from ROOT types to HDF5 types:
+    declare -A typemap
+    typemap[Char_t]=H5T_NATIVE_CHAR
+    typemap[UChar_t]=H5T_NATIVE_UCHAR
+    typemap[Short_t]=H5T_NATIVE_SHORT
+    typemap[UShort_t]=H5T_NATIVE_USHORT
+    typemap[Int_t]=H5T_NATIVE_INT
+    typemap[UInt_t]=H5T_NATIVE_UINT
+    typemap[Long_t]=H5T_NATIVE_LONG
+    typemap[ULong_t]=H5T_NATIVE_ULONG
+    typemap[Float_t]=H5T_NATIVE_FLOAT
+    typemap[Double_t]=H5T_NATIVE_DOUBLE
+
+    startdir=$(pwd)
+    workdir=$(mktemp -d -p ".")
+    treename=$1
+    infile=$2
+    converter_prog=$3
+    touch "$converter_prog"
+    dirname="$(dirname $infile)"
+    rootdir=${dirname:0:1}
+    if [[ $rootdir == "/" ]] ; then
+        # absolute
+        infilepath=$infile
+    else
+        # relative
+        infilepath=$(pwd)/$infile
+    fi
+    cd $workdir
+    (
+        echo "TTree* tree;"
+        echo "_file0->GetObject(\"$treename\",tree);"
+        echo "tree->MakeClass(\"treeclass\");"
+        echo ".q"
+    ) | root -l $infilepath
+    cat treeclass.h | awk 'BEGIN {in_branches=0} {if(/Declaration of leaf types/) in_branches=1; else if(/List of branches/) in_branches=0; else if(in_branches) print($0)}' | awk '{if($0) print($0)}' > branches.txt
+    # Parse variables:
+    types=($(cat branches.txt | awk '{print($1)}'))
+    rawvars=($(cat branches.txt | awk '{print($2)}' | sed -e 's/;//'))
+    arraytypes=($(cat branches.txt | grep '\[' | awk '{print($1)}'));
+    atoms=($(for a in ${rawvars[@]}; do echo $a | grep -v '\['; done;))
+    rawarrays=($(for a in ${rawvars[@]}; do echo $a | grep '\['; done;))
+    arrays=($(for a in ${rawarrays[@]}; do echo $a | sed -e 's/\[.*\]//'; done;))
+    arraysizes=($(for a in ${rawarrays[@]}; do echo $a | grep -o '[[:digit:]]\+'; done;))
+    # Generate source code:
+    # Fix header:
+    cat treeclass.h | awk 'BEGIN {in_class=0; needs_fixing=1;} {if(/class/) {in_class=1; print($0);} else if(in_class && /};/) print("ClassDef(treeclass,1);};"); else print($0);}' > treeclass2.h
+    mv treeclass2.h treeclass.h
+    (
+        # Headers:
+        echo "#include <TFile.h>"
+        echo "#include <TTree.h>"
+        echo "#include <iostream>"
+        echo "#include \"treeclass.h\""
+        echo "extern \"C\" {"
+        echo "#include <hdf5.h>"
+        echo "}"
+        
+        # event struct:
+        echo "struct event {"
+        cat branches.txt
+        echo "};"
+
+        # event copy function:
+        echo "void copy_event(treeclass& treeclass_event, event& e)"
+        echo "{ //scalars:"
+        for((i=0;i<${#atoms[@]};i=(i+1))); do
+            echo "e.${atoms[i]} = treeclass_event.${atoms[i]};"
+        done;
+        echo "//arrays:"
+        for((i=0;i<${#arrays[@]};i=(i+1))); do
+            echo "for(int i = 0; i < ${arraysizes[i]}; ++i) e.${arrays[i]}[i] = treeclass_event.${arrays[i]}[i];"
+        done;
+        echo "}"
+
+        # Start of main:
+        echo "int main(int argc, char** argv)"
+        echo "{"
+        echo "if(argc != 3) {"
+        echo "std::cerr << \"Usage: $(basename $converter_prog) <input_file.root> <output_file.h5>\""
+        echo "<< std::endl;"
+        echo "return 1;"
+        echo "}"
+
+        # Open input file:
+        echo "TFile infile(argv[1],\"read\");"
+        echo "TTree* tree;"
+        echo "infile.GetObject(\"$treename\",tree);"
+
+        # Setup Branches:
+        echo "treeclass treeclass_event(tree);"
+
+        echo "hsize_t numevents = tree->GetEntries();"
+        echo "if (numevents <= 0)"
+        echo "return 1;"
+
+        echo "event* buffer = new event[numevents];"
+        echo "hid_t file, dataset, space, memspace, cparms;"
+        echo "herr_t status;"
+        echo "hsize_t dataspace_dim[] = {numevents};"
+        echo "hsize_t dataspace_maxdim[] = {numevents};"
+        # this doesn't seem consistent with writing all events at once
+        echo "hsize_t slabsize[] = {1};"
+        echo "hsize_t chunkdim[] = {numevents};"
+        echo "space = H5Screate_simple(1,dataspace_dim,dataspace_maxdim);"
+        echo "file = H5Fcreate(argv[2],H5F_ACC_TRUNC,H5P_DEFAULT,H5P_DEFAULT);"
+        echo "cparms = H5Pcreate(H5P_DATASET_CREATE);"
+        echo "status = H5Pset_chunk(cparms,1,chunkdim);"
+        echo "status = H5Pset_deflate(cparms,1);"
+
+        # Create array datatypes:
+        for((i=0; i<${#arrays[@]}; i=(i+1))); do
+            makearraytype ${arrays[i]} ${arraytypes[i]} ${arraysizes[i]}
+        done
+
+        # Create compound type:
+        echo "hid_t event_tid;"
+        echo "event_tid = H5Tcreate(H5T_COMPOUND, sizeof(event));"
+        # Insert members:
+        for((i=0; i<${#rawvars[@]}; i=(i+1))); do
+            if [[ $(echo ${rawvars[i]} | grep '\[') == "" ]] ; then
+                # scalar
+                echo "H5Tinsert(event_tid,\"${rawvars[i]}\", HOFFSET(event, ${rawvars[i]}), ${typemap[${types[i]}]});"
+            else
+                # array
+                arrayname=$(echo ${rawvars[i]} | sed -e 's/\[.*\]//')
+                echo "H5Tinsert(event_tid,\"$arrayname\", HOFFSET(event, $arrayname), $(arraytypename $arrayname));"
+            fi
+        done
+
+        # Create dataset
+        echo "dataset = H5Dcreate1(file,\"treename\",event_tid,space,cparms);"
+        # Create memspace
+        echo "memspace = H5Screate_simple(1,slabsize,0);"
+        echo "hsize_t slab_block_count[] = {1};"
+
+        # Conversion loop:
+        echo "for(int row=0; row<numevents; ++row) {"
+        echo "tree->GetEvent(row);"
+        echo "copy_event(treeclass_event,buffer[row]);"
+        echo "}"
+
+        # Write to dataset
+        echo "space = H5Dget_space(dataset);"
+        echo "status = H5Dwrite(dataset,event_tid,H5S_ALL,H5S_ALL,H5P_DEFAULT,buffer);"
+        echo "status = H5Sclose(space);"
+
+        # Cleanup
+        echo "status = H5Pclose(cparms);"
+        echo "status = H5Tclose(event_tid);"
+        echo "status = H5Sclose(memspace);"
+        echo "status = H5Dclose(dataset);"
+        echo "status = H5Fclose(file);"
+        echo "infile.Close();"
+        echo "return 0;"
+        echo "}"
+    ) > source.cc
+    # Make dictionaries & compile:
+    rootcint -f treeclass_dict.cxx -c treeclass.h
+    g++ `root-config --cflags` -c treeclass_dict.cxx -o treeclass_dict.o
+    g++ `root-config --cflags` -c treeclass.C -o treeclass.o
+    g++ `root-config --cflags` -c source.cc -o source.o
+    g++ `root-config --libs` -lhdf5 source.o treeclass.o treeclass_dict.o -o converter_prog
+    # cleanup:
+    cd "$startdir"
+    mv "$workdir/converter_prog" "$converter_prog"
+    rm -r $workdir
+fi
