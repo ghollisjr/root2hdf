@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright 2014 Gary Hollis
 # This script is in the public domain, use it for whatever
 function makearraytype
 {
