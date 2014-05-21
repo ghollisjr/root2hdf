@@ -157,7 +157,7 @@ else
         done
 
         # Create dataset
-        echo "dataset = H5Dcreate1(file,\"treename\",event_tid,space,cparms);"
+        echo "dataset = H5Dcreate1(file,\"$treename\",event_tid,space,cparms);"
         # Create memspace
         echo "memspace = H5Screate_simple(1,slabsize,0);"
         echo "hsize_t slab_block_count[] = {1};"
