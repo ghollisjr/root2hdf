@@ -16,16 +16,17 @@ function arraytypename
     echo "${arrayname}_type"
 }
 
-if [[ $# -ne 3 ]] ; then
+if [[ $# -ne 2 ]] ; then
 
-    echo "Usage: root2hdf <treename> <infile.root> <converter_prog>"
+    echo "Usage: root2hdf <treename> <converter_prog>"
     echo ""
     echo "This script generates a program for converting a ROOT file"
     echo "into an HDF5 file, taking the input and output file names"
-    echo "as its only arguments."
+    echo "as its only arguments.  The sample root files should be given"
+    echo "via standard input."
     
 else
-
+    
     # Map from ROOT types to HDF5 types:
     declare -A typemap
     typemap[Char_t]=H5T_NATIVE_CHAR
@@ -42,25 +43,29 @@ else
     startdir=$(pwd)
     workdir=$(mktemp -d -p ".")
     treename=$1
-    infile=$2
-    converter_prog=$3
+    converter_prog=$2
+    infiles=($(cat '-'))
+    infile=${infiles[0]}
     touch "$converter_prog"
-    dirname="$(dirname $infile)"
-    rootdir=${dirname:0:1}
-    if [[ $rootdir == "/" ]] ; then
-        # absolute
-        infilepath=$infile
-    else
-        # relative
-        infilepath=$(pwd)/$infile
-    fi
+    
     cd $workdir
     (
-        echo "TTree* tree;"
-        echo "_file0->GetObject(\"$treename\",tree);"
-        echo "tree->MakeClass(\"treeclass\");"
+        echo "TChain chain(\"$treename\");"
+        for i in ${infiles[@]}; do
+            dirname="$(dirname $i)"
+            rootdir=${dirname:0:1}
+            if [[ $rootdir == "/" ]] ; then
+                # absolute
+                infilepath=$i
+            else
+                # relative
+                infilepath=$startdir/$i
+            fi
+            echo "chain.AddFile(\"$infilepath\");"
+        done
+        echo "chain->MakeClass(\"treeclass\");"
         echo ".q"
-    ) | root -l $infilepath
+    ) | root -l
     cat treeclass.h | awk 'BEGIN {in_branches=0} {if(/Declaration of leaf types/) in_branches=1; else if(/List of branches/) in_branches=0; else if(in_branches) print($0)}' | awk '{if($0) print($0)}' > branches.txt
     # Parse variables:
     types=($(cat branches.txt | awk '{print($1)}'))
